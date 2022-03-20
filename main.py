@@ -11,7 +11,7 @@ file = 'networks/earthquake.bif'
 
 
 def main():
-    par = {'variables':['JohnCalls', 'MaryCalls'], 'evidence': {'Burglary': 'True'}}
+    par = {'variables':['JohnCalls', 'MaryCalls'], 'evidence': {'Alarm': 'True','Burglary':'True'}}
     network = BN.load(file)
     # network.to_daft(node_pos='spring').render()
     # plt.show()
