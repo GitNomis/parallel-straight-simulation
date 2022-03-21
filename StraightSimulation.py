@@ -4,17 +4,39 @@ from pgmpy.factors.discrete import DiscreteFactor
 import numpy as np
 
 
+class ProcessorVariable():
+    def __init__(self, factors, state, var, state_names_map):
+        self.state_names_map = state_names_map
+        self.factors = factors
+        self.state = state
+        self.var = var
+
+    def getValue(self):
+        pass
+
+    def sample(self):
+        p = np.ones(len(self.state_names_map))
+        # calc P
+        for cpd in self.factors:
+            reduceEvidence = [(evi, self.state[evi])
+                              for evi in cpd.scope() if evi != self.var]
+            p *= cpd.reduce(reduceEvidence, inplace=False).values
+        # sample
+        p /= np.sum(p)
+        sample = np.random.choice(p.size, p=p)
+        self.state[self.var] = self.state_names_map[sample]
+        return p, sample
+
+
 class StraightSimulation(BayesianModelInference):
 
-    def query(self, variables, n_samples=10000, evidence=None):
+    def query(self, variables, n_samples=10000, evidence={}):
         # Init
-        # self._initialize_structures()
         workModel = self.model.copy()
-        simVars = [var for var in self.topological_order if var not in evidence]
 
-        nameToIndex = {var: i for i, var in enumerate(self.topological_order)}
         valueToInt = {var: {val: i for i, val in values.items()}
                       for var, values in self.state_names_map.items()}
+
         # Fix evidence
         cpds = [cpd.to_factor() for cpd in workModel.get_cpds()]
 
@@ -28,35 +50,28 @@ class StraightSimulation(BayesianModelInference):
                 cpd.reduce(observedEvidence, inplace=True)
 
         # Init state forward
-        state = np.zeros(len(self.topological_order), dtype=int)
-        for var, val in evidence.items():
-            state[nameToIndex[var]] = valueToInt[var][val]
+        # future better start state (forward sample)
+        state = {var: self.state_names_map[var][0]
+                 for var in self.topological_order if var not in evidence}
+        simVars = []
+        for var in state:
+            simVars.append(ProcessorVariable(
+                factors[var], state, var, self.state_names_map[var]))
 
         results = np.zeros([self.cardinality[v] for v in variables])
-        # future better start state (forward sample)
-        # set of indecies for updating states
+
         # Loop N times
         for i in range(n_samples):
-
             # Loop vars
             for var in simVars:
-                # markov blanket
-                p = np.ones(self.cardinality[var])
-                # calc P
-                for cpd in factors[var]:
-                    reduceEvidence = [(evi, self.state_names_map[evi][state[nameToIndex[evi]]])
-                                      for evi in simVars if evi in cpd.scope() and evi != var]
-                    p *= cpd.reduce(reduceEvidence, inplace=False).values
-                # sample
-                state[nameToIndex[var]] = np.random.choice(
-                    p.size, p=(p/np.sum(p)))
+                p, value = var.sample()
 
             # update state
-            subState = state[[nameToIndex[v] for v in variables]]
+            subState = [valueToInt[v][state[v]] for v in variables]
             results[tuple(subState)] += 1
             # note result
 
         # normalize with N
         results /= n_samples
 
-        return DiscreteFactor(variables, results.shape, results, {k: v for k, v in workModel.states.items() if k in variables})
+        return DiscreteFactor(variables, results.shape, results, {v: workModel.states[v] for v in variables})
