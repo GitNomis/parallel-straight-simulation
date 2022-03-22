@@ -5,32 +5,35 @@ import numpy as np
 
 
 class ProcessorVariable():
-    def __init__(self, factors, state, var, state_names_map):
+    def __init__(self, factors, var, state_names_map,par):
         self.state_names_map = state_names_map
         self.factors = factors
-        self.state = state
         self.var = var
+        self.par = par
 
     def getValue(self):
         pass
 
-    def sample(self):
+    def sample(self,state,newState=None):
         p = np.ones(len(self.state_names_map))
         # calc P
         for cpd in self.factors:
-            reduceEvidence = [(evi, self.state[evi])
+            reduceEvidence = [(evi, state[evi])
                               for evi in cpd.scope() if evi != self.var]
             p *= cpd.reduce(reduceEvidence, inplace=False).values
         # sample
         p /= np.sum(p)
         sample = np.random.choice(p.size, p=p)
-        self.state[self.var] = self.state_names_map[sample]
+        if self.par:
+            newState[self.var]= self.state_names_map[sample]
+        else:    
+            state[self.var] = self.state_names_map[sample]
         return p, sample
 
 
 class StraightSimulation(BayesianModelInference):
 
-    def query(self, variables, n_samples=10000, evidence={}):
+    def query(self, variables, n_samples=10000,par=False, evidence={}):
         # Init
         workModel = self.model.copy()
 
@@ -53,10 +56,12 @@ class StraightSimulation(BayesianModelInference):
         # future better start state (forward sample)
         state = {var: self.state_names_map[var][0]
                  for var in self.topological_order if var not in evidence}
+        newState =  {var: self.state_names_map[var][0]
+                 for var in self.topological_order if var not in evidence}       
         simVars = []
         for var in state:
             simVars.append(ProcessorVariable(
-                factors[var], state, var, self.state_names_map[var]))
+                factors[var], var, self.state_names_map[var],par))
 
         results = np.zeros([self.cardinality[v] for v in variables])
 
@@ -64,7 +69,11 @@ class StraightSimulation(BayesianModelInference):
         for i in range(n_samples):
             # Loop vars
             for var in simVars:
-                p, value = var.sample()
+                p, value = var.sample(state,newState)
+            if par:
+                inte=state
+                state=newState
+                newState=inte    
 
             # update state
             subState = [valueToInt[v][state[v]] for v in variables]
