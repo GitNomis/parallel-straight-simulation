@@ -1,86 +1,119 @@
 from collections import defaultdict
 from pgmpy.sampling import BayesianModelInference
 from pgmpy.factors.discrete import DiscreteFactor
+from pgmpy.global_vars import SHOW_PROGRESS
 import numpy as np
+from tqdm import trange
 
 
-class ProcessorVariable():
-    def __init__(self, factors, var, state_names_map,par):
-        self.state_names_map = state_names_map
-        self.factors = factors
+class Processor():
+    def __init__(self, var, factors):
+        """
+        Initilizes the Processor class, which is responsible for simulating a specific variable.
+
+        Args:
+            var (str): The name of the variable to be simulated.
+            factors (list): The list of factors including the variable `var`.
+        """
+
         self.var = var
-        self.par = par
+        self.factors = factors
 
-    def getValue(self):
-        pass
+    def sample(self, state, output):
+        """
+        Calculates the probability distribution of the variable corresponding to this Processor and samples a new value.
 
-    def sample(self,state,newState=None):
-        p = np.ones(len(self.state_names_map))
-        # calc P
+        Args:
+            state (numpy.array): The current state to consider for sampling.
+            output (numpy.array): The output state to write the new sample to.
+
+        Returns:
+            p,sample (numpy.array,int): The probability distribution and sampled value.
+        """
+
+        p = 1
+        # Calculate probability distribution
         for cpd in self.factors:
-            reduceEvidence = [(evi, state[evi])
-                              for evi in cpd.scope() if evi != self.var]
-            p *= cpd.reduce(reduceEvidence, inplace=False).values
-        # sample
+            evidence = [(evi, cpd.no_to_name[evi][state[evi]])
+                        for evi in cpd.scope() if evi != self.var]
+            p *= cpd.reduce(evidence, inplace=False).values
+
+        # Normalize
         p /= np.sum(p)
+        # Sample
         sample = np.random.choice(p.size, p=p)
-        if self.par:
-            newState[self.var]= self.state_names_map[sample]
-        else:    
-            state[self.var] = self.state_names_map[sample]
+        output[self.var] = sample
+
         return p, sample
 
 
 class StraightSimulation(BayesianModelInference):
 
-    def query(self, variables, n_samples=10000,par=False, evidence={}):
-        # Init
-        workModel = self.model.copy()
+    def query(self, variables, n_samples=10000, evidence={}, parallel=False, show_progress=True):
+        """
+        Approximates the posterior distribution of a given query using the Straight Simulation method.
+        Straight Simulation can be run completly parallelised, with different convergence properties.
 
-        valueToInt = {var: {val: i for i, val in values.items()}
-                      for var, values in self.state_names_map.items()}
+        Args:
+            variables (list): Variables to query.
+            n_samples (int, optional): Number of samples to generate. Defaults to 10000.
+            evidence (dict, optional): Evidence of the query. Defaults to {}.
+            parallel (bool, optional): Whether to run parallel Straight Simulation. Defaults to False.
+            show_progress (bool, optional): Whether to show a progress bar. Defaults to True.
 
-        # Fix evidence
-        cpds = [cpd.to_factor() for cpd in workModel.get_cpds()]
+        Returns:
+            DiscreteFactor: The discrete factor containing the approximated distribution of the given query
+        """
 
+        # Copy working cpds
+        cpds = [cpd.to_factor() for cpd in self.model.get_cpds()]
+
+        # Fix evidence by reducing evidence variables
         factors = defaultdict(list)
         for cpd in cpds:
+            relevantEvidence = [
+                (var, val) for var, val in evidence.items() if var in cpd.scope()]
+            if relevantEvidence:
+                cpd.reduce(relevantEvidence, inplace=True)
             for var in cpd.scope():
                 factors[var].append(cpd)
-            observedEvidence = [
-                (var, val) for var, val in evidence.items() if var in cpd.scope()]
-            if observedEvidence:
-                cpd.reduce(observedEvidence, inplace=True)
 
-        # Init state forward
-        # future better start state (forward sample)
-        state = {var: self.state_names_map[var][0]
-                 for var in self.topological_order if var not in evidence}
-        newState =  {var: self.state_names_map[var][0]
-                 for var in self.topological_order if var not in evidence}       
-        simVars = []
-        for var in state:
-            simVars.append(ProcessorVariable(
-                factors[var], var, self.state_names_map[var],par))
+        # Simulation Order (#TODO different simulation order)
+        simulationOrder = [
+            var for var in self.topological_order if var not in evidence]
 
+        # Create explicit processors for each variable
+        Processors = [Processor(var, factors[var]) for var in simulationOrder]
+
+        # Create states and results (#TODO forward sample init state)
+        states = np.array(np.zeros(n_samples+1), dtype=[
+                         (var, np.int8) for var in factors.keys()])
         results = np.zeros([self.cardinality[v] for v in variables])
 
-        # Loop N times
-        for i in range(n_samples):
-            # Loop vars
-            for var in simVars:
-                p, value = var.sample(state,newState)
-            if par:
-                inte=state
-                state=newState
-                newState=inte    
+        # Progress bar
+        if show_progress and SHOW_PROGRESS:
+            pbar = trange(n_samples)
+            pbar.set_description(f"Generating samples")
+        else:
+            pbar = range(n_samples)
 
-            # update state
-            subState = [valueToInt[v][state[v]] for v in variables]
-            results[tuple(subState)] += 1
-            # note result
+        # Loop N times
+        for i in pbar:
+
+            # Copy state for next iteration
+            if not parallel:
+                states[i+1] = states[i]
+
+            # Loop variables
+            for var in Processors:
+                # Update current state or next state
+                p, value = var.sample(
+                    states[i] if parallel else states[i+1], states[i+1])
+
+            # Note result (#TODO test saving probabilities)
+            results[tuple(states[i+1][variables])] += 1
 
         # normalize with N
         results /= n_samples
 
-        return DiscreteFactor(variables, results.shape, results, {v: workModel.states[v] for v in variables})
+        return DiscreteFactor(variables, results.shape, results, {v: self.model.states[v] for v in variables})

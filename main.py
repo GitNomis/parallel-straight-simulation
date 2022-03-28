@@ -22,12 +22,12 @@ def main():
     rs = RS(network)
     veRes=ve.query(**par)
     stsRes=sts.query(**par,n_samples=10000)
-    stspRes=sts.query(**par,n_samples=10000,par=True)
-    #rsRes=rs.query(**par,n_samples=10000)
+    stspRes=sts.query(**par,n_samples=10000,parallel=True)
+    rsRes=rs.query(**par,n_samples=10000)
     print("Variable Elimination:\n",veRes)
     print("Straight Simluation:\n",stsRes)
     print("Parallel Straight Simluation:\n",stspRes)
-    #print("Rejection Sampling:\n",rsRes)
+    print("Rejection Sampling:\n",rsRes)
 
 
 if __name__ == "__main__":
