@@ -34,7 +34,7 @@ class Processor():
         p = 1
         # Calculate probability distribution
         for cpd in self.factors:
-            evidence = [(evi, cpd.no_to_name[evi][state[evi]])
+            evidence = [(evi, cpd.get_state_names(evi, state[evi]))
                         for evi in cpd.scope() if evi != self.var]
             p *= cpd.reduce(evidence, inplace=False).values
 
@@ -62,33 +62,41 @@ class StraightSimulation(BayesianModelInference):
             show_progress (bool, optional): Whether to show a progress bar. Defaults to True.
 
         Returns:
-            DiscreteFactor: The discrete factor containing the approximated distribution of the given query
+            DiscreteFactor: The discrete factor containing the approximated distribution for the given query
         """
 
-        # Copy working cpds
-        cpds = [cpd.to_factor() for cpd in self.model.get_cpds()]
-
-        # Fix evidence by reducing evidence variables
-        factors = defaultdict(list)
-        for cpd in cpds:
-            relevantEvidence = [
-                (var, val) for var, val in evidence.items() if var in cpd.scope()]
-            if relevantEvidence:
-                cpd.reduce(relevantEvidence, inplace=True)
-            for var in cpd.scope():
-                factors[var].append(cpd)
-
         # Simulation Order (#TODO different simulation order)
-        simulationOrder = [
+        nodes = [
             var for var in self.topological_order if var not in evidence]
 
-        # Create explicit processors for each variable
-        Processors = [Processor(var, factors[var]) for var in simulationOrder]
+        results = np.zeros([self.cardinality[v] for v in variables])
 
         # Create states and results (#TODO forward sample init state)
         states = np.array(np.zeros(n_samples+1), dtype=[
-                         (var, np.int8) for var in factors.keys()])
-        results = np.zeros([self.cardinality[v] for v in variables])
+                         (var, np.int8) for var in nodes])
+
+        # Prepare factors
+        factors = defaultdict(list)
+        for node in self.topological_order:
+            factor = self.model.get_cpds(node).to_factor()
+            # Fix evidence
+            relevantEvidence = [
+                (var, val) for var, val in evidence.items() if var in factor.scope()]
+            if relevantEvidence:
+                factor.reduce(relevantEvidence, inplace=True)
+            for var in factor.scope():
+                factors[var].append(factor)
+
+            # Forward sample initial state
+            if node not in evidence:
+                relevantEvidence = [(evi, factor.get_state_names(evi, states[0][evi]))
+                                    for evi in factor.scope() if evi != node]
+                p = factor.reduce(relevantEvidence, inplace=False).values
+                # Sample
+                states[0][node] = np.random.choice(p.size, p=p)
+
+        # Create Processor object for each variable
+        Processors = [Processor(var, factors[var]) for var in nodes]
 
         # Progress bar
         if show_progress and SHOW_PROGRESS:
