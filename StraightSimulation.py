@@ -69,18 +69,16 @@ class StraightSimulation(BayesianModelInference):
         nodes = [
             var for var in self.topological_order if var not in evidence]
 
-        # Create states and results
-        state = np.array(0, dtype=[(var, np.int8) for var in nodes])
-        output = state if parallel else np.array(
-            0, dtype=[(var, np.int8) for var in nodes])
-
         results = np.zeros([self.cardinality[v] for v in variables])
+
+        # Create states and results (#TODO forward sample init state)
+        states = np.array(np.zeros(n_samples+1), dtype=[
+                         (var, np.int8) for var in nodes])
 
         # Prepare factors
         factors = defaultdict(list)
         for node in self.topological_order:
             factor = self.model.get_cpds(node).to_factor()
-            
             # Fix evidence
             relevantEvidence = [
                 (var, val) for var, val in evidence.items() if var in factor.scope()]
@@ -91,11 +89,11 @@ class StraightSimulation(BayesianModelInference):
 
             # Forward sample initial state
             if node not in evidence:
-                relevantEvidence = [(evi, factor.get_state_names(evi, state[evi]))
+                relevantEvidence = [(evi, factor.get_state_names(evi, states[0][evi]))
                                     for evi in factor.scope() if evi != node]
                 p = factor.reduce(relevantEvidence, inplace=False).values
                 # Sample
-                state[node] = np.random.choice(p.size, p=p)
+                states[0][node] = np.random.choice(p.size, p=p)
 
         # Create Processor object for each variable
         Processors = [Processor(var, factors[var]) for var in nodes]
@@ -110,19 +108,18 @@ class StraightSimulation(BayesianModelInference):
         # Loop N times
         for i in pbar:
 
+            # Copy state for next iteration
+            if not parallel:
+                states[i+1] = states[i]
+
             # Loop variables
             for var in Processors:
                 # Update current state or next state
-                p, value = var.sample(state, output)
+                p, value = var.sample(
+                    states[i] if parallel else states[i+1], states[i+1])
 
             # Note result (#TODO test saving probabilities)
-            results[tuple(output[variables])] += 1
-
-            # Swap states for next iteration
-            if not parallel:
-                help = state
-                state = output
-                output = help
+            results[tuple(states[i+1][variables])] += 1
 
         # normalize with N
         results /= n_samples
