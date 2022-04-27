@@ -3,6 +3,8 @@ from pgmpy.sampling import BayesianModelInference
 from pgmpy.factors.discrete import DiscreteFactor
 from pgmpy.global_vars import SHOW_PROGRESS
 import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
 from tqdm import trange
 
 
@@ -39,6 +41,8 @@ class Processor():
             p *= cpd.reduce(evidence, inplace=False).values
 
         # Normalize
+        if np.sum(p)==0:
+            return 0,None
         p /= np.sum(p)
         # Sample
         sample = np.random.choice(p.size, p=p)
@@ -124,4 +128,24 @@ class StraightSimulation(BayesianModelInference):
         # normalize with N
         results /= n_samples
 
+        # Logging
+        self.logs = [factors,states,results]
+
         return DiscreteFactor(variables, results.shape, results, {v: self.model.states[v] for v in variables})
+
+class Logger(StraightSimulation):
+
+    def getLogs(self):
+        try:
+            return self.logs
+        except:
+            return []    
+
+    def plot(self):
+        logs = self.getLogs()
+        if not logs:
+            return
+        factors,states,results=logs
+        results= pd.DataFrame(results)
+        results.plot(kind="bar")
+
