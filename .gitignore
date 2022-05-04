@@ -1,3 +1,6 @@
 __pycache__/
 output/
 notes.txt
+networks/chains
+networks/diamonds
+networks/parents
