@@ -40,9 +40,9 @@ class Processor():
                         for evi in cpd.scope() if evi != self.var]
             p *= cpd.reduce(evidence, inplace=False).values
 
+        if np.sum(p) == 0:
+            return 0, None
         # Normalize
-        if np.sum(p)==0:
-            return 0,None
         p /= np.sum(p)
         # Sample
         sample = np.random.choice(p.size, p=p)
@@ -129,9 +129,10 @@ class StraightSimulation(BayesianModelInference):
         results /= n_samples
 
         # Logging
-        self.logs = [factors,states,results]
+        self.logs = [factors, states, results]
 
         return DiscreteFactor(variables, results.shape, results, {v: self.model.states[v] for v in variables})
+
 
 class Logger(StraightSimulation):
 
@@ -139,13 +140,12 @@ class Logger(StraightSimulation):
         try:
             return self.logs
         except:
-            return []    
+            return []
 
     def plot(self):
         logs = self.getLogs()
         if not logs:
             return
-        factors,states,results=logs
-        results= pd.DataFrame(results)
+        factors, states, results = logs
+        results = pd.DataFrame(results)
         results.plot(kind="bar")
-

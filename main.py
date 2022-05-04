@@ -1,27 +1,29 @@
 from pgmpy.models import BayesianNetwork as BN
 from pgmpy.inference import VariableElimination as VarElim
 from pgmpy.inference import ApproxInference as RejSamp
-from NetworkGenerator import dense
 from StraightSimulation import StraightSimulation as StrSim
 from StraightSimulation import Logger as StrSimLog
 from utils import *
 
-file = 'parents/basic10_inverse'
+file = 'diamonds/basic10_0.5'
 inPath = f'networks/{file}.bif'
-outPath = f'output/{file}.out' if 0 else None
+outPath = f'output/{file}' if 1 else None
 
 
 def main():
     methods = ["Variable Elimination","Straight Simulation","Parallel Straight Simulation","Rejection Sampling"]
-    args = {'variables':[0,1],'evidence':{2:0}}
+    args = {'variables':['V0'],'evidence':{'V9':'DiTernary'}}
     #args = {'variables':[ 'MaryCalls','JohnCalls'], 'evidence': {'Earthquake':'True','Burglary':'True'}}
     #args = {'variables':['AppOK', 'DataFile'], 'evidence': {'Problem4':'Yes','TTOK':'Yes'}}
     #args = {'variables':['alcoholism', 'ChHepatitis'], 'evidence': {'diabetes':'present','pain_ruq':'present'}}
-    n_samples = 10000
-    network = dense(10,1)#BN.load(inPath)
+    n_samples = 20
+    n_runs = 100
+    network = BN.load(inPath)
         
     #displayNetwork(network)
     test(methods, args, n_samples, network)
+    del args['n_samples']
+    varianceTest(network,args,n_samples,n_runs,outPath)
     # strSim = StrSimLog(network)
     # print(strSim.query(**args,n_samples=n_samples))
     # strSim.plot()
@@ -40,7 +42,7 @@ def test(methods, args, n_samples, network):
     try:
         results.append(rejSamp.query(**args))
     except:
-        methods=methods[:-1]
+        del methods[-1]
     dump(methods,results,args,outPath)
 
 
