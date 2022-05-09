@@ -3,7 +3,6 @@ from pgmpy.sampling import BayesianModelInference
 from pgmpy.factors.discrete import DiscreteFactor
 from pgmpy.global_vars import SHOW_PROGRESS
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm import trange
 
@@ -40,8 +39,6 @@ class Processor():
                         for evi in cpd.scope() if evi != self.var]
             p *= cpd.reduce(evidence, inplace=False).values
 
-        if np.sum(p) == 0:
-            return 0, None
         # Normalize
         p /= np.sum(p)
         # Sample
@@ -84,18 +81,18 @@ class StraightSimulation(BayesianModelInference):
         for node in self.topological_order:
             factor = self.model.get_cpds(node).to_factor()
             # Fix evidence
-            relevantEvidence = [
+            blanket_evidence = [
                 (var, val) for var, val in evidence.items() if var in factor.scope()]
-            if relevantEvidence:
-                factor.reduce(relevantEvidence, inplace=True)
+            if blanket_evidence:
+                factor.reduce(blanket_evidence, inplace=True)
             for var in factor.scope():
                 factors[var].append(factor)
 
             # Forward sample initial state
             if node not in evidence:
-                relevantEvidence = [(evi, factor.get_state_names(evi, states[0][evi]))
+                blanket_evidence = [(evi, factor.get_state_names(evi, states[0][evi]))
                                     for evi in factor.scope() if evi != node]
-                p = factor.reduce(relevantEvidence, inplace=False).values
+                p = factor.reduce(blanket_evidence, inplace=False).values
                 # Sample
                 states[0][node] = np.random.choice(p.size, p=p)
 
@@ -104,8 +101,7 @@ class StraightSimulation(BayesianModelInference):
 
         # Progress bar
         if show_progress and SHOW_PROGRESS:
-            pbar = trange(n_samples)
-            pbar.set_description(f"Generating samples")
+            pbar = trange(n_samples, desc="Generating samples")
         else:
             pbar = range(n_samples)
 
@@ -118,14 +114,14 @@ class StraightSimulation(BayesianModelInference):
 
             # Loop variables
             for var in Processors:
-                # Update current state or next state
+                # Calculate p and update state
                 p, value = var.sample(
                     states[i] if parallel else states[i+1], states[i+1])
 
             # Note result (#TODO test saving probabilities)
             results[tuple(states[i+1][variables])] += 1
 
-        # normalize with N
+        # Normalize with N
         results /= n_samples
 
         # Logging
