@@ -1,9 +1,12 @@
 from collections import defaultdict
-from pgmpy.sampling import BayesianModelInference
-from pgmpy.factors.discrete import DiscreteFactor
-from pgmpy.global_vars import SHOW_PROGRESS
+
 import numpy as np
 import pandas as pd
+from networkx.algorithms.coloring import greedy_color
+from networkx.algorithms.moral import moral_graph
+from pgmpy.factors.discrete import DiscreteFactor
+from pgmpy.global_vars import SHOW_PROGRESS
+from pgmpy.sampling import BayesianModelInference
 from tqdm import trange
 
 
@@ -50,6 +53,13 @@ class Processor():
 
 class StraightSimulation(BayesianModelInference):
 
+    def _order(self):
+        model = moral_graph(self.model)
+        colors = greedy_color(model, 'largest_first')
+        order = [[var for (var, col) in colors.items() if col == color]
+                 for color in range(max(colors.values())+1)]
+        return order
+
     def query(self, variables, n_samples=10000, evidence={}, parallel=False, show_progress=True):
         """
         Approximates the posterior distribution of a given query using the Straight Simulation method.
@@ -72,7 +82,7 @@ class StraightSimulation(BayesianModelInference):
 
         results = np.zeros([self.cardinality[v] for v in variables])
 
-        # Create states and results (#TODO forward sample init state)
+        # Create states and results
         states = np.array(np.zeros(n_samples+1), dtype=[
                          (var, np.int8) for var in nodes])
 
@@ -101,7 +111,7 @@ class StraightSimulation(BayesianModelInference):
 
         # Progress bar
         if show_progress and SHOW_PROGRESS:
-            pbar = trange(n_samples, desc="Generating samples")
+            pbar = trange(n_samples, desc="Generating samples", leave=None)
         else:
             pbar = range(n_samples)
 

@@ -1,20 +1,23 @@
-from itertools import product
+import fileinput
+import os
+import re
+import sys
+import warnings
 from functools import reduce
-from pgmpy.extern import tabulate
-from tqdm import trange
-from pgmpy.factors.discrete import DiscreteFactor
-from pgmpy.inference import VariableElimination as VarElim
-from pgmpy.inference import ApproxInference as RejSamp
-from StraightSimulation import StraightSimulation as StrSim
+from itertools import product, takewhile
+
+import daft
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import daft
-import sys
-import os
-import warnings
+from pgmpy.extern import tabulate
+from pgmpy.factors.discrete import DiscreteFactor
+from pgmpy.inference import ApproxInference as RejSamp
+from pgmpy.inference import VariableElimination as VarElim
+from pgmpy.models import BayesianNetwork
+from tqdm import trange
 
-#warnings.simplefilter('always', UserWarning)
+from StraightSimulation import StraightSimulation as StrSim
 
 
 def displayNetwork(network):
@@ -68,6 +71,40 @@ def relError(exact, approx):
     return np.sum(np.abs(1-(approx/exact)))
 
 
+def runJob(file):
+    valid_methods = {"StrSim": StrSim, "RejSamp": RejSamp}
+    valid_types = {'i': int, 'b': bool, 's': str}
+    lines = fileinput.input(f"input/{file}.in")
+    jobs = [(i, takewhile(lambda x: not x.isspace(), lines))
+            for i in range(int(next(lines)))]
+
+    for i, job in jobs:
+        func, *func_args = next(job).split()
+        if func == "varianceTest":
+            network = BayesianNetwork.load(f"networks/{func_args[0]}.bif")
+            n_runs = int(func_args[1])
+            ident = func_args[2] if len(func_args) > 2 else f"j{i}_"
+            variables, evidence = next(job).split("|")
+            args = {'variables': [], 'evidence': {}}
+            for var in variables.split():
+                args['variables'].append(var)
+            for evi in evidence.split():
+                var, val = evi.split("=")
+                args['evidence'][var] = val
+            methods, pars = [], []
+            for line in job:
+                method, *raw_pars = line.split()
+                methods.append(valid_methods[method](network))
+                par = {}
+                for raw_par in raw_pars:
+                    key, val = raw_par.split("=")
+                    par[key] = valid_types[val[0]](val[1:])
+                pars.append(par)
+            varianceTest(network, methods, pars, args, n_runs,
+                         f"output/jobs/{file}/{func_args[0]}", ident)
+    lines.close()
+
+
 def multiRun(exact, method, args, n_runs):
     vars = [[(var, val) for val in exact.state_names[var]]
             for var in exact.scope()]
@@ -87,31 +124,39 @@ def multiRun(exact, method, args, n_runs):
         tabulate(table, [*cpd.scope(), "abs error mean", "abs error std", "rel error mean", "rel error std"], "grid"))
 
 
-def varianceTest(network, titles, methods, pars, args, n_samples, n_runs, outPath=None):
+def varianceTest(network, methods, pars, args, n_runs, outPath=None, ident=""):
     metrics = [kullbackLeibler, absError, relError]
     labels = ["relative entropy", "absolute error", "relative error"]
 
-    try:
-        iter(n_samples)
-    except:
-        for par in pars:
-            par['n_samples'] = n_samples
-        plot_suptitle = f"P({reduce(lambda x,y: x+', '+y, args['variables'])}| {reduce(lambda x,y: x+', '+y, [k+'='+v for k,v in args['evidence'].items()])}) with {n_samples} samples, {n_runs} runs"
-    else:
-        for i, par in enumerate(pars):
-            par['n_samples'] = n_samples[i]
-            titles[i] += f"\nwith {n_samples[i]} samples"
-        plot_suptitle = f"P({reduce(lambda x,y: x+', '+y, args['variables'])}| {reduce(lambda x,y: x+', '+y, [k+'='+v for k,v in args['evidence'].items()])}) with {n_runs} runs"
-    finally:
-        for par in pars:
+    titles = []
+    for method, par in zip(methods, pars):
+        if isinstance(method, StrSim):
+            title = "Straight Simulation"
+        elif isinstance(method, RejSamp):
+            title = "Rejection Sampling"
             par['show_progress'] = False
+        else:
+            title = "Unknown"
+        if 'parallel' in par and par['parallel']:
+            title = "Parallel "+title
+        titles.append(title)
+
+    title = titles[0] if np.unique(titles).size is 1 else ""
+    ns_samples = [par['n_samples'] for par in pars]
+    n_samples = ns_samples[0] if np.unique(ns_samples).size is 1 else ""
+
+    if not n_samples:
+        titles = [f"{s} samples"if title else f"{t}\nwith {s} samples" for t, s in zip(
+            titles, ns_samples)]
+
+    plot_suptitle = f"P({reduce(lambda x,y: x+', '+y, args['variables'])}| {reduce(lambda x,y: x+', '+y, [k+'='+v for k,v in args['evidence'].items()])}){' using ' if title else ''}{title} with {n_samples}{' samples, ' if n_samples else ''}{n_runs} runs"
 
     ve = VarElim(network).query(**args)
     exact = getValues(ve, args['variables'], ve.state_names)
 
     metric_data = np.zeros((n_runs, len(methods), len(metrics)))
     value_data = np.zeros((n_runs, len(methods), exact.size))
-    for i in trange(n_runs, desc="Running iteration"):
+    for i in trange(n_runs, desc="Running iteration", leave=None):
         for q, (method, par) in enumerate(zip(methods, pars)):
             query = method.query(**args, **par)
             values = getValues(query, args['variables'], ve.state_names)
@@ -120,7 +165,7 @@ def varianceTest(network, titles, methods, pars, args, n_samples, n_runs, outPat
                 metric_data[i, q, m] = metric(exact, values)
 
     fig, axs = plt.subplots(nrows=len(metrics), ncols=1, sharex=True,
-                            constrained_layout=True, figsize=(2+len(methods), len(metrics)*3))
+                            constrained_layout=True, figsize=(len(methods)*2, len(metrics)*3))
     for m in range(len(metrics)):
         axs[m].violinplot(metric_data[:, :, m],
                           showmeans=True, showmedians=False)
@@ -136,7 +181,7 @@ def varianceTest(network, titles, methods, pars, args, n_samples, n_runs, outPat
     if outPath:
         os.makedirs(outPath, exist_ok=True)
         plt.savefig(
-            f"{outPath}/{outPath.split('/')[-1]}_{n_samples}s_{n_runs}r_metrics.pdf", format='pdf', transparent=True)
+            f"{outPath}/{ident}{outPath.split('/')[-1]}{'_' if title else ''}{title.replace(' ','')}{f'_{n_samples}s' if n_samples else ''}_{n_runs}r_metrics.pdf", format='pdf', transparent=True)
     else:
         plt.show(block=False)
 
@@ -144,7 +189,7 @@ def varianceTest(network, titles, methods, pars, args, n_samples, n_runs, outPat
                                                                            for var in args['variables']])]
 
     fig, axs = plt.subplots(nrows=len(states), ncols=1, sharex=True,
-                            constrained_layout=True, figsize=(2+len(methods), len(states)*3))
+                            constrained_layout=True, figsize=(len(methods)*2, len(states)*3))
     for m in range(len(states)):
         axs[m].violinplot(value_data[:, :, m],
                           showmeans=True, showmedians=False)
@@ -162,7 +207,7 @@ def varianceTest(network, titles, methods, pars, args, n_samples, n_runs, outPat
     fig.suptitle(plot_suptitle, fontsize='medium')
     if outPath:
         plt.savefig(
-            f"{outPath}/{outPath.split('/')[-1]}_{n_samples}s_{n_runs}r_probs.pdf", format='pdf')
+            f"{outPath}/{ident}{outPath.split('/')[-1]}{'_' if title else ''}{title.replace(' ','')}{f'_{n_samples}s' if n_samples else ''}_{n_runs}r_probs.pdf", format='pdf', transparent=True)
     else:
         plt.show()
 

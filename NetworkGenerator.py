@@ -1,7 +1,7 @@
-from pgmpy.models import BayesianNetwork
-from pgmpy.factors.discrete import TabularCPD
-from scipy.stats import truncnorm
 import numpy as np
+from pgmpy.factors.discrete import TabularCPD
+from pgmpy.models import BayesianNetwork
+from tqdm import tqdm, trange
 
 from utils import displayNetwork
 
@@ -9,7 +9,7 @@ folder = f'networks/'
 states = ['Mono', 'Di', 'Tri', 'Tetra', 'Penta', 'Hexa', 'Hepta', 'Octa']
 arities = ['Unaray', 'Binary', 'Ternary', 'Quaternary',
            'Quinary', 'Senary', 'Septenary', 'Octonary']
-card_probs = [0.02,0.45,0.25,0.10,0.08,0.05,0.03,0.02]         
+card_probs = [0.02, 0.45, 0.25, 0.10, 0.08, 0.05, 0.03, 0.02]
 
 
 def generateCPD(var, var_card, evidence=np.array([]), evidence_card=np.array([])):
@@ -26,8 +26,9 @@ def generateCPD(var, var_card, evidence=np.array([]), evidence_card=np.array([])
                       evidence_card=evidence_card,
                       state_names=state_names)
 
+
 def generateCards(n):
-    return np.random.choice(range(1, 9), n,p=card_probs)                      
+    return np.random.choice(range(1, 9), n, p=card_probs)
 
 
 def diamond(n, p):
@@ -80,26 +81,66 @@ def chain(n):
     return model
 
 
+def chromatic_number(network, show_progress=False):
+    colors = dict([(var, None) for var in network.nodes])
+    result = dict()
+    pbar = trange(1, 1+len(network.nodes), leave=None,
+                  disable=not show_progress)
+    for i in pbar:
+        pbar.set_description(f"Attempting to color using {i} colors")
+        result = try_color(network, colors.copy(), i, show_progress)
+        if result:
+            return i, result
+
+
+def try_color(network, colors, max_colors, show_progress):
+    if show_progress:
+        show_progress -= 1
+    variable = None
+    for (var, col) in colors.items():
+        if col is None:
+            variable = var
+            break
+    if variable is None:
+        return colors
+
+    color_options = set(range(max_colors)) - \
+        set([colors[var] for var in network.adj[variable]])
+    if not color_options:
+        return dict()
+
+    result = None
+    pbar = tqdm(color_options, leave=None, disable=not show_progress)
+    for col in pbar:
+        pbar.set_description(f"Trying {variable} = {col}")
+        colors[variable] = col
+        result = try_color(network, colors.copy(), max_colors, show_progress)
+        if result:
+            return result
+    return dict()
+
+
 def main():
     network_funtion = diamond
+    name = "basic"
     if network_funtion == chain:
-        n = 4
-        file = f"chains/basic{n}"
+        n = 50
+        file = f"chains/{name}{n}"
         args = {'n': n}
     elif network_funtion == parent:
         n = 4
         inverse = False
-        file = f"parents/basic{n}{('_inverse' if inverse else '')}"
+        file = f"parents/{name}{n}{('_inverse' if inverse else '')}"
         args = {'n': n, 'inverse': inverse}
     elif network_funtion == diamond:
-        n = 10
+        n = 60
         p = 0.2
-        file = f"diamonds/basic{n}_{p}"
+        file = f"diamonds/{name}{n}_{p}"
         args = {'n': n, 'p': p}
 
     model = network_funtion(**args)
     displayNetwork(model)
-    #model.save(folder+file+".bif")
+    model.save(folder+file+".bif")
 
 
 if __name__ == "__main__":
