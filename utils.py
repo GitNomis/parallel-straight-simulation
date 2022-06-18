@@ -1,17 +1,13 @@
 import fileinput
 import os
-import re
 import sys
 import warnings
 from functools import reduce
 from itertools import product, takewhile
 
-import daft
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from pgmpy.extern import tabulate
-from pgmpy.factors.discrete import DiscreteFactor
 from pgmpy.inference import ApproxInference as RejSamp
 from pgmpy.inference import VariableElimination as VarElim
 from pgmpy.models import BayesianNetwork
@@ -80,7 +76,12 @@ def runJob(file):
 
     for i, job in jobs:
         func, *func_args = next(job).split()
-        if func == "varianceTest":
+        if func == "skip":
+            l = 0
+            for _ in job:
+                l += 1
+            print(f"Skipped j{i} of {l} lines")
+        elif func == "varianceTest":
             network = BayesianNetwork.load(f"networks/{func_args[0]}.bif")
             n_runs = int(func_args[1])
             ident = func_args[2] if len(func_args) > 2 else f"j{i}_"
@@ -141,15 +142,25 @@ def varianceTest(network, methods, pars, args, n_runs, outPath=None, ident=""):
             title = "Parallel "+title
         titles.append(title)
 
-    title = titles[0] if np.unique(titles).size is 1 else ""
-    ns_samples = [par['n_samples'] for par in pars]
-    n_samples = ns_samples[0] if np.unique(ns_samples).size is 1 else ""
+    suptitle_method = f" using {titles[0]}" if np.unique(
+        titles).size is 1 else ""
+    file_method = f"_{titles[0].replace(' ','')}" if np.unique(
+        titles).size is 1 else ""
 
-    if not n_samples:
-        titles = [f"{s} samples"if title else f"{t}\nwith {s} samples" for t, s in zip(
+    ns_samples = [par['n_samples'] for par in pars]
+
+    suptitle_samples = f"{ns_samples[0]} samples, " if np.unique(
+        ns_samples).size is 1 else ""
+    file_samples = f"_{ns_samples[0]}s" if np.unique(
+        ns_samples).size is 1 else ""
+
+    if not suptitle_samples:
+        titles = [f"{s} samples"if suptitle_method else f"{t}\nwith {s} samples" for t, s in zip(
             titles, ns_samples)]
 
-    plot_suptitle = f"P({reduce(lambda x,y: x+', '+y, args['variables'])}| {reduce(lambda x,y: x+', '+y, [k+'='+v for k,v in args['evidence'].items()])}){' using ' if title else ''}{title} with {n_samples}{' samples, ' if n_samples else ''}{n_runs} runs"
+    suptitle_vars = reduce(lambda x, y: x+', '+y, args['variables'])
+    suptitle_evis = f"| {reduce(lambda x,y: x+', '+y, [k+'='+v for k,v in args['evidence'].items()])}" if args['evidence'] else ""
+    plot_suptitle = f"P({suptitle_vars}{suptitle_evis}){suptitle_method} with {suptitle_samples}{n_runs} runs"
 
     ve = VarElim(network).query(**args)
     exact = getValues(ve, args['variables'], ve.state_names)
@@ -165,7 +176,7 @@ def varianceTest(network, methods, pars, args, n_runs, outPath=None, ident=""):
                 metric_data[i, q, m] = metric(exact, values)
 
     fig, axs = plt.subplots(nrows=len(metrics), ncols=1, sharex=True,
-                            constrained_layout=True, figsize=(len(methods)*2, len(metrics)*3))
+                            constrained_layout=True, figsize=(max(5, len(methods)*2), len(metrics)*3))
     for m in range(len(metrics)):
         axs[m].violinplot(metric_data[:, :, m],
                           showmeans=True, showmedians=False)
@@ -181,7 +192,7 @@ def varianceTest(network, methods, pars, args, n_runs, outPath=None, ident=""):
     if outPath:
         os.makedirs(outPath, exist_ok=True)
         plt.savefig(
-            f"{outPath}/{ident}{outPath.split('/')[-1]}{'_' if title else ''}{title.replace(' ','')}{f'_{n_samples}s' if n_samples else ''}_{n_runs}r_metrics.pdf", format='pdf', transparent=True)
+            f"{outPath}/{ident}{outPath.split('/')[-1]}{file_method}{file_samples}_{n_runs}r_metrics.pdf", format='pdf', transparent=True)
     else:
         plt.show(block=False)
 
@@ -189,7 +200,7 @@ def varianceTest(network, methods, pars, args, n_runs, outPath=None, ident=""):
                                                                            for var in args['variables']])]
 
     fig, axs = plt.subplots(nrows=len(states), ncols=1, sharex=True,
-                            constrained_layout=True, figsize=(len(methods)*2, len(states)*3))
+                            constrained_layout=True, figsize=(max(5, len(methods)*2), len(states)*3))
     for m in range(len(states)):
         axs[m].violinplot(value_data[:, :, m],
                           showmeans=True, showmedians=False)
@@ -200,14 +211,13 @@ def varianceTest(network, methods, pars, args, n_runs, outPath=None, ident=""):
         axs[m].grid(axis='y', alpha=0.3, linestyle=':')
         axs[m].hlines(exact.flatten()[m], [0.75], [len(methods)+0.25], linewidth=1,
                       color='r', alpha=0.5, label=f"exact = {exact.flatten()[m]:.4f}")
-        # xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large'
         axs[m].legend(fontsize='x-small')
     axs[0].tick_params(labeltop=True, labelsize='small')
     axs[0].set_xticks(ticks=range(1, 1+len(methods)), labels=titles)
     fig.suptitle(plot_suptitle, fontsize='medium')
     if outPath:
         plt.savefig(
-            f"{outPath}/{ident}{outPath.split('/')[-1]}{'_' if title else ''}{title.replace(' ','')}{f'_{n_samples}s' if n_samples else ''}_{n_runs}r_probs.pdf", format='pdf', transparent=True)
+            f"{outPath}/{ident}{outPath.split('/')[-1]}{file_method}{file_samples}_{n_runs}r_probs.pdf", format='pdf', transparent=True)
     else:
         plt.show()
 

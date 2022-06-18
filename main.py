@@ -1,36 +1,34 @@
 from pgmpy.models import BayesianNetwork as BN
 from pgmpy.inference import VariableElimination as VarElim
 from pgmpy.inference import ApproxInference as RejSamp
-from NetworkGenerator import chromatic_number
+from NetworkGenerator import chromatic_number, diamond,chain,parent
 from StraightSimulation import StraightSimulation as StrSim
 from StraightSimulation import Logger as StrSimLog
 from networkx.algorithms.coloring import greedy_color 
 from networkx.algorithms.moral import moral_graph
 from utils import *
 
-file = 'diamonds/basic5_0.2'
+file = 'specific/break'
 inPath = f'networks/{file}.bif'
-outPath = f'output/{file}' if 1 else None
+outPath = f'output/{file}' if 0 else None
 
 
 def main():
     network = BN.load(inPath)
-    n_samples = 100
-    n_runs = 100
-    methods = [StrSim(network),StrSim(network),RejSamp(network)]
-    pars = [{'n_samples':n_samples},{'parallel':True,'n_samples':n_samples},{'n_samples':n_samples}]
-    args = {'variables':['V0'],'evidence':{'V9':'DiTernary'}}
-    # print(greedy_color(moral_graph(network)))
-    # print(StrSim(network)._order())
-    # print(chromatic_number(moral_graph(network),3))
-    #args = {'variables':[ 'MaryCalls','JohnCalls'], 'evidence': {'Earthquake':'True','Burglary':'True'}}
-    #args = {'variables':['AppOK', 'DataFile'], 'evidence': {'Problem4':'Yes','TTOK':'Yes'}}
-    #args = {'variables':['alcoholism', 'ChHepatitis'], 'evidence': {'diabetes':'present','pain_ruq':'present'}}
+    n_samples = 1000
+    n_runs = 30
+    methods = [StrSim(network),StrSim(network),StrSim(network),RejSamp(network)]
+    pars = [{'n_samples':n_samples},{'parallel':True,'n_samples':n_samples},{'parallel':True,'n_samples':n_samples,'swap':True},{'n_samples':n_samples}]
+    #args = {'variables':['V0','V2','V3'],'evidence':{}}
+    args = {'variables':['XOR'],'evidence':{}}#'Value':'V0True'}}
+    #print(greedy_color(moral_graph(network)))
+    #print(len(StrSim(network)._order()))
+    #print(chromatic_number(moral_graph(network),8))
     #displayNetwork(network)
     #test(dict(args), n_samples, network)
-    varianceTest(network,methods,pars,args,n_runs,outPath)
+    #varianceTest(network,methods,pars,args,n_runs,outPath)
     #job=input()
-    #runJob(job)
+    runJob('job_presentation')
     # strSim = StrSimLog(network)
     # print(strSim.query(**args,n_samples=n_samples))
     # strSim.plot()

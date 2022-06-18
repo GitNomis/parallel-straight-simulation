@@ -82,39 +82,35 @@ def chain(n):
 
 
 def chromatic_number(network, show_progress=False):
-    colors = dict([(var, None) for var in network.nodes])
     result = dict()
     pbar = trange(1, 1+len(network.nodes), leave=None,
                   disable=not show_progress)
     for i in pbar:
         pbar.set_description(f"Attempting to color using {i} colors")
-        result = try_color(network, colors.copy(), i, show_progress)
+        result = try_color(network, set(network.nodes),
+                           dict(), i, show_progress)
         if result:
             return i, result
 
 
-def try_color(network, colors, max_colors, show_progress):
+def try_color(network, variables, colors, max_colors, show_progress):
     if show_progress:
         show_progress -= 1
-    variable = None
-    for (var, col) in colors.items():
-        if col is None:
-            variable = var
-            break
-    if variable is None:
+    if not variables:
         return colors
+    variable = variables.pop()
 
-    color_options = set(range(max_colors)) - \
-        set([colors[var] for var in network.adj[variable]])
-    if not color_options:
-        return dict()
+    new_color = min(max(colors.values(), default=-1)+1, max_colors-1)
+    color_options = {*colors.values(), new_color}
+    color_options -= set(colors.get(var, None)
+                         for var in network.adj[variable])
 
-    result = None
     pbar = tqdm(color_options, leave=None, disable=not show_progress)
     for col in pbar:
         pbar.set_description(f"Trying {variable} = {col}")
         colors[variable] = col
-        result = try_color(network, colors.copy(), max_colors, show_progress)
+        result = try_color(network, variables.copy(), colors.copy(),
+                           max_colors, show_progress)
         if result:
             return result
     return dict()
@@ -133,14 +129,14 @@ def main():
         file = f"parents/{name}{n}{('_inverse' if inverse else '')}"
         args = {'n': n, 'inverse': inverse}
     elif network_funtion == diamond:
-        n = 60
-        p = 0.2
+        n = 10
+        p = 0.3
         file = f"diamonds/{name}{n}_{p}"
         args = {'n': n, 'p': p}
 
     model = network_funtion(**args)
     displayNetwork(model)
-    model.save(folder+file+".bif")
+    model.save(folder+file+".bif", filetype='bif')
 
 
 if __name__ == "__main__":

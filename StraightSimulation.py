@@ -1,7 +1,6 @@
 from collections import defaultdict
 
 import numpy as np
-import pandas as pd
 from networkx.algorithms.coloring import greedy_color
 from networkx.algorithms.moral import moral_graph
 from pgmpy.factors.discrete import DiscreteFactor
@@ -134,24 +133,4 @@ class StraightSimulation(BayesianModelInference):
         # Normalize with N
         results /= n_samples
 
-        # Logging
-        self.logs = [factors, states, results]
-
         return DiscreteFactor(variables, results.shape, results, {v: self.model.states[v] for v in variables})
-
-
-class Logger(StraightSimulation):
-
-    def getLogs(self):
-        try:
-            return self.logs
-        except:
-            return []
-
-    def plot(self):
-        logs = self.getLogs()
-        if not logs:
-            return
-        factors, states, results = logs
-        results = pd.DataFrame(results)
-        results.plot(kind="bar")
