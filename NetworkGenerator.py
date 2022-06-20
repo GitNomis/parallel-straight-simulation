@@ -117,15 +117,15 @@ def try_color(network, variables, colors, max_colors, show_progress):
 
 
 def main():
-    network_funtion = diamond
-    name = "basic"
+    network_funtion = parent
+    name = "basic2"
     if network_funtion == chain:
         n = 50
         file = f"chains/{name}{n}"
         args = {'n': n}
     elif network_funtion == parent:
-        n = 4
-        inverse = False
+        n = 10
+        inverse = True
         file = f"parents/{name}{n}{('_inverse' if inverse else '')}"
         args = {'n': n, 'inverse': inverse}
     elif network_funtion == diamond:
